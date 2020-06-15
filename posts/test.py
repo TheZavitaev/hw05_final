@@ -4,15 +4,6 @@ from django.core.cache import cache
 
 from .models import Post, User, Group
 
-# Данные для регистрации
-signup_data = {
-    'first_name': 'Петр',
-    'last_name': 'Петров',
-    'username': 'petr',
-    'email': 'petr@petr.com',
-    'password1': 'pwd_petr',
-    'password2': 'pwd_petr'}
-
 
 class TestProfile(TestCase):
     def setUp(self):
@@ -22,19 +13,36 @@ class TestProfile(TestCase):
         self.user = User.objects.create_user(
             username='vasya', email='vasya@vasya.com',
             password='12345')
-        # Создаем пост
-        self.post = Post.objects.create(text='Тестовый пост', author=self.user)
+        # Данные для регистрации
+        self.signup_data = {
+            'first_name': 'Петр',
+            'last_name': 'Петров',
+            'username': 'petr',
+            'email': 'petr@petr.com',
+            'password1': 'pwd_petr',
+            'password2': 'pwd_petr'}
 
     def test_add_profile_page(self):
         """Проверяет, появилась ли страница пользователя после регистрации"""
         # Регистрируемся
-        self.client.post(reverse('signup'), signup_data)
+        self.client.post(reverse('signup'), self.signup_data)
         # Логимся
         self.client.login(username='petr', password='pwd_petr')
         # Проверяем, появился ли новый пользователь
         response = self.client.get(
             reverse('profile', kwargs={'username': 'petr'}))
         self.assertEqual(response.status_code, 200)
+
+
+class TestPostCreated(TestCase):
+    def setUp(self):
+        # Очищаем кэш
+        cache.clear()
+        # Создаем пользователя
+        self.user = User.objects.create_user(
+            username='vasya', password='12345')
+        # Создаем пост
+        self.post = Post.objects.create(text='Тестовый пост', author=self.user)
 
     def test_authorized_user_new_post(self):
         """Проверяет, что авторизованный пользователь
@@ -44,10 +52,8 @@ class TestProfile(TestCase):
         # Создаем новый пост
         self.client.post(reverse('new_post'), kwargs={'text': 'Новый пост'})
         # Проверяем, появился ли пост после отправки формы
-        response = self.client.get(reverse('index'))
-        self.assertContains(
-            response, 'Новый пост', count=1, status_code=200,
-            msg_prefix='Пост не найден', html=False)
+        post1 = Post.objects.first()
+        self.assertEqual(post1.text, self.post.text)
 
     def test_unauthorized_user_new_post(self):
         """Проверяет, что неавторизованный пользователь не
@@ -58,31 +64,6 @@ class TestProfile(TestCase):
             reverse('new_post'), {'text': 'Новый пост'})
         self.assertRedirects(
             response, '/auth/login/?next=/new/', status_code=302)
-
-    def test_post_add_everywhere(self):
-        """Проверяет, что опубликовынный пост появляется
-        на всех связанных страницах"""
-        # Пост на главной странице
-        response = self.client.get(reverse('index'))
-        self.assertContains(
-            response, 'Тестовый пост', count=1,
-            status_code=200, msg_prefix='Пост не найден на главной странице',
-            html=False)
-        # Пост на странице автора
-        self.client.login(username='vasya', password='12345')
-        response = self.client.get(
-            reverse('profile', kwargs={'username': self.user.username}))
-        self.assertContains(
-            response, 'Тестовый пост', count=1,
-            status_code=200,
-            msg_prefix='Пост не найден на странице пользователя', html=False)
-        # Пост на стронице поста
-        response = self.client.get(
-            reverse('profile', kwargs={'username': self.user.username}))
-        self.assertContains(
-            response, 'Тестовый пост', count=1,
-            status_code=200, msg_prefix='Пост не найден на странице поста',
-            html=False)
 
     def test_authorized_user_post_edit(self):
         """Проверяет, что авторизованный пользователь может
@@ -116,6 +97,42 @@ class TestProfile(TestCase):
         self.assertContains(
             response, 'Изменили тестовый пост', count=1,
             status_code=200, msg_prefix='Пост не изменен на странице поста',
+            html=False)
+
+
+class TestPostRender(TestCase):
+    def setUp(self):
+        # Очищаем кэш
+        cache.clear()
+        # Создаем пользователя
+        self.user = User.objects.create_user(
+            username='vasya', password='12345')
+        # Создаем пост
+        self.post = Post.objects.create(text='Тестовый пост', author=self.user)
+
+    def test_post_add_everywhere(self):
+        """Проверяет, что опубликовынный пост появляется
+        на всех связанных страницах"""
+        # Пост на главной странице
+        response = self.client.get(reverse('index'))
+        self.assertContains(
+            response, 'Тестовый пост', count=1,
+            status_code=200, msg_prefix='Пост не найден на главной странице',
+            html=False)
+        # Пост на странице автора
+        self.client.login(username='vasya', password='12345')
+        response = self.client.get(
+            reverse('profile', kwargs={'username': self.user.username}))
+        self.assertContains(
+            response, 'Тестовый пост', count=1,
+            status_code=200,
+            msg_prefix='Пост не найден на странице пользователя', html=False)
+        # Пост на стронице поста
+        response = self.client.get(
+            reverse('profile', kwargs={'username': self.user.username}))
+        self.assertContains(
+            response, 'Тестовый пост', count=1,
+            status_code=200, msg_prefix='Пост не найден на странице поста',
             html=False)
 
 
@@ -245,7 +262,7 @@ class TestFollow(TestCase):
             response, 'Тест подписок', status_code=200,
             count=1, msg_prefix='Пост не найден',
             html=False)
-        # Выходим из аккаунта и првоеряем ленту
+        # Выходим из аккаунта и проверяем ленту
         self.client.logout()
         # Очищаем кэш
         cache.clear()
@@ -256,31 +273,33 @@ class TestFollow(TestCase):
             msg_prefix='Пост найден, а не должен',
             html=False)
 
-    def test_comment(self):
-        """Проверяет, что только авторизированный пользователь
-        может комментировать посты"""
-        # Оставляем комментарий залогиненным пользователем
-        self.client.post(
-            reverse('add_comment', kwargs={
-                'username': self.user3, 'post_id': self.post.id}),
-            {'text': 'Проверяем комментарий залогиненного'})
-        # Проверяем наличие комментария
-        response = self.client.get(
-            reverse('post_view', kwargs={'username': self.user3,
-                                         'post_id': self.post.id}))
-        self.assertContains(
-            response, 'Проверяем комментарий залогиненного', status_code=200,
-            count=1, msg_prefix='Комментарий не найден',
-            html=False)
-        # Выходим из аккаунта
-        self.client.logout()
-        # Пытаемся добавить комментарий незалогиненным пользователем
-        self.client.post(
-            reverse('add_comment', kwargs={
-                'username': self.user3, 'post_id': self.post.id}),
-            {'text': 'Проверяем комментарии незалогиненного'})
-        self.assertNotContains(
-            response, 'Проверяем комментарии незалогиненного',
-            status_code=200,
-            msg_prefix='Комментарий найден, а не должен',
-            html=False)
+
+class TestComment(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='vasya',
+                                             password=12345)
+        self.text = 'Тестовый пост'
+        self.post = Post.objects.create(
+            text=self.text, author=self.user)
+
+        self.commenting_user = User.objects.create_user(
+            username='ivan',
+            password=12345)
+        self.comment_text = 'Тестовый коммент'
+
+    def test_auth_user_commenting(self):
+        """Залогиненный юзер не может оставить комментарий"""
+        self.client.force_login(self.commenting_user)
+        response = self.client.post(
+            reverse('add_comment', kwargs={'username': self.user.username,
+                                           'post_id': self.post.pk}),
+            {'text': self.comment_text}, follow=True)
+        self.assertContains(response, self.comment_text)
+
+    def test_anon_user_commenting(self):
+        """Незалогиненный юзер не может оставить комментарий"""
+        response = self.client.post(
+            reverse('add_comment', kwargs={'username': self.user.username,
+                                           'post_id': self.post.pk}),
+            {'text': self.comment_text}, follow=True)
+        self.assertNotContains(response, self.comment_text)
