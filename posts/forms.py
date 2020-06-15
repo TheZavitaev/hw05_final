@@ -6,16 +6,11 @@ from .models import Post, Comment
 class PostForm(ModelForm):
     class Meta:
         model = Post
-        fields = ('group', 'text', 'image') # почему в теории тут лист?
+        fields = ('group', 'text', 'image')
 
 
 class CommentForm(ModelForm):
     class Meta:
         model = Comment
         fields = ('text',)
-        # labels = {
-        #     'text': 'Комментарий'
-        # }
-        widgets = {
-            'text': Textarea(attrs={'rows': 3}),
-        }
+        widgets = {'text': Textarea(attrs={'rows': 3}), }

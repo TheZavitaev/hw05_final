@@ -47,33 +47,29 @@ def new_post(request):
 
 def profile(request, username):
     author = get_object_or_404(User, username=username)
-    posts = author.author_posts.filter(author=author)
+    posts = author.author_posts.all()
     paginator = Paginator(posts, 10)
     page_number = request.GET.get('page')
     page = paginator.get_page(page_number)
-    following = None
-    if author.following.filter(user=request.user.id):
-        following = True
+    is_following = author.following.filter(author__username=username).exists()
 
     return render(request, 'posts/profile.html',
-                  {'author': author, 'posts': posts, 'page': page,
-                   'paginator': paginator, 'username': username,
-                   'following': following})
+                  {'author': author, 'page': page,
+                   'paginator': paginator,
+                   'following': is_following})
 
 
 def post_view(request, username, post_id):
     author = get_object_or_404(User, username=username)
     post = get_object_or_404(Post, author=author, id=post_id)
     form = CommentForm()
-    items = post.comments.filter(post=post)
-    following = None
-    if author.following.filter(user=request.user.id):
-        following = True
+    comments = post.comments.filter(post=post)
+    is_following = author.following.filter(author__username=username).exists()
     return render(request,
                   'posts/post.html',
                   {'post': post, 'author': author,
-                   'form': form, 'items': items,
-                   'following': following})
+                   'form': form, 'comments': comments,
+                   'following': is_following})
 
 
 @login_required
@@ -102,7 +98,8 @@ def post_edit(request, username, post_id):
 
 @login_required
 def add_comment(request, username, post_id):
-    post = get_object_or_404(Post, id=post_id)
+    post_author = get_object_or_404(User, username=username)
+    post = get_object_or_404(Post, author=post_author, id=post_id)
 
     if request.method == 'POST':
         form = CommentForm(request.POST)
@@ -117,8 +114,7 @@ def add_comment(request, username, post_id):
 
 @login_required
 def follow_index(request):
-    follow = Follow.objects.filter(user=request.user).values('author')
-    posts = Post.objects.select_related('author').filter(author__in=follow)
+    posts = Post.objects.filter(author__following__user=request.user)
     paginator = Paginator(posts, 10)
     page_number = request.GET.get('page')
     page = paginator.get_page(page_number)
@@ -131,12 +127,8 @@ def follow_index(request):
 @login_required
 def profile_follow(request, username):
     author = get_object_or_404(User, username=username)
-    already_followed = Follow.objects.filter(
-        user=request.user.id,
-        author=author.id).exists()
-
-    if author.id != request.user.id and not already_followed:
-        Follow.objects.create(user=request.user, author=author)
+    if request.user != author:
+        Follow.objects.get_or_create(user=request.user, author=author)
 
     return redirect('profile', username=username)
 
@@ -144,12 +136,8 @@ def profile_follow(request, username):
 @login_required
 def profile_unfollow(request, username):
     author = get_object_or_404(User, username=username)
-    already_followed = Follow.objects.filter(user=request.user.id,
-                                             author=author.id).exists()
-
-    if already_followed:
-        Follow.objects.filter(user=request.user.id,
-                              author=author.id).delete()
+    if request.user != author:
+        Follow.objects.filter(user=request.user, author=author).delete()
 
     return redirect('profile', username)
 

@@ -1,220 +1,286 @@
-from django.test import TestCase, Client, override_settings
+from django.test import TestCase
 from django.urls import reverse
+from django.core.cache import cache
 
-from .models import User, Post, Group, Follow
+from .models import Post, User, Group
 
-TEST_CACHE = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-    }
-}
+# Данные для регистрации
+signup_data = {
+    'first_name': 'Петр',
+    'last_name': 'Петров',
+    'username': 'petr',
+    'email': 'petr@petr.com',
+    'password1': 'pwd_petr',
+    'password2': 'pwd_petr'}
 
 
-class ViewsTests(TestCase):
+class TestProfile(TestCase):
     def setUp(self):
-        self.client = Client()
-        self.user = User.objects.create_user(username='vasya',
-                                             email='vasya@pypkin.com',
-                                             password='12345678')
-        self.post = Post.objects.create(text='Очень грустные тесты',
-                                        author=self.user)
-        self.client.force_login(self.user)
-
-    def test_profile_view(self):
-        response = self.client.get(reverse(
-            'profile', kwargs={'username': self.user.username}))
-        self.assertEqual(response.status_code, 200)
-
-    def test_new_post(self):
-        # Авторизованный пользователь может опубликовать пост (new_post)
-        response = self.client.get(reverse('new_post'))
-        self.assertEqual(response.status_code, 200)
-
-    def test_new_post_for_unauthorized_user(self):
-        response = self.client.get(reverse('new_post'), follow=True)
-        self.assertRedirects(response, '/auth/login/?next=/new/')
-
-    def test_post_index(self):
-        # После публикации поста новая запись появляется на главной
-        # странице сайта (index)
-        self.client.post(reverse('new_post'), {'text': self.post.text})
-        response = self.client.get(reverse('index'))
-        self.assertContains(response, self.post)
-
-    def test_post_profile(self):
-        # После публикации поста новая запись появляется на
-        # персональной странице пользователя (profile)
-        self.client.force_login(self.user)
-        response = self.client.get(
-            reverse('profile', kwargs={'username': self.user.username}))
-        self.assertContains(response, self.post.text)
-
-    def test_post_view(self):
-        # После публикации поста новая запись появляется на отдельной
-        # странице поста (post_view)
-        self.client.force_login(self.user)
-        response = self.client.get(reverse('post_view', kwargs={
-            'username': self.user.username, 'post_id': self.post.id}))
-        self.assertContains(response, self.post.text)
-
-    @override_settings(CACHES=TEST_CACHE)
-    def test_post_edit_index(self):
-        # Авторизованный пользователь может отредактировать свой пост
-        # и его содержимое изменится на главной странице сайта (index)
-        self.client.force_login(self.user)
-        self.edited_post = 'отредактированный пост'
-        self.client.post(f'/{self.user.username}/{self.post.id}/edit/',
-                         {'text': self.edited_post})
-        response = self.client.get(reverse('index'))
-        self.assertContains(response, self.edited_post)
-
-    @override_settings(CACHES=TEST_CACHE)
-    def test_post_edit_profile(self):
-        # Авторизованный пользователь может отредактировать свой пост и его
-        # содержимое изменится на персональной странице пользователя (profile)
-        self.client.force_login(self.user)
-        self.edited_post = 'отредактированный пост'
-        self.client.post(f'/{self.user.username}/{self.post.id}/edit/',
-                         {'text': self.edited_post})
-        response = self.client.get(
-            reverse('profile', kwargs={'username': self.user.username}))
-        self.assertContains(response, self.edited_post)
-
-    @override_settings(CACHES=TEST_CACHE)
-    def test_post_edit_post_view(self):
-        # Авторизованный пользователь может отредактировать свой пост и его
-        # содержимое изменится на отдельной странице поста (post_view)
-        self.client.force_login(self.user)
-        self.edited_post = 'отредактированный пост'
-        self.client.post(f'/{self.user.username}/{self.post.id}/edit/',
-                         {'text': self.edited_post}, follow=False)
-        response = self.client.get(reverse('post_view', kwargs={
-            'username': self.user.username, 'post_id': self.post.id}))
-        self.assertContains(response, self.edited_post)
-
-
-class FollowTests(TestCase):
-    def setUp(self):
-        self.client = Client()
-        self.user1 = User.objects.create_user(username='vasya',
-                                              email='vasya@pypkin.com',
-                                              password='12345')
-        self.user2 = User.objects.create_user(username='nevasya',
-                                              email='nevasya@pypkin.com',
-                                              password='12345')
-        self.user3 = User.objects.create_user(username='dalekonevasya',
-                                              email='dalekonevasya@pypkin.com',
-                                              password='12345')
-        self.post = Post.objects.create(text='4 утра, а ничего не работает :(',
-                                        author=self.user2)
-
-    def test_follow(self):
-        # Авторизованный пользователь может подписываться
-        # на других пользователей
-        self.client.force_login(self.user1)
-        self.client.get(reverse('profile_follow',
-                                kwargs={'username': self.user2.username}))
-        self.assertEqual(Follow.objects.count(), 1)
-
-    def test_unfollow(self):
-        # Авторизованный пользователь может удалять
-        # других пользователей из подписок.
-        self.client.force_login(self.user1)
-        self.client.get(reverse('profile_follow',
-                                kwargs={'username': self.user2.username}))
-        self.client.get(reverse('profile_unfollow',
-                                kwargs={'username': self.user2.username}))
-        self.assertEqual(Follow.objects.count(), 0)
-
-    def test_follow_post(self):
-        # Новая запись пользователя появляется в ленте тех,
-        # кто на него подписан
-        self.client.force_login(self.user1)
-        self.client.get(reverse('profile_follow',
-                                kwargs={'username': self.user2.username}))
-        response = self.client.get(reverse('follow_index'))
-        self.assertContains(response, self.post.text, status_code=200)
-        self.client.force_login(self.user3)
-        response = self.client.get(reverse('follow_index'))
-        self.assertNotContains(response, self.post.text, status_code=200)
-
-
-class CommentTests(TestCase):
-    def setUp(self):
-        self.client = Client()
-        self.user = User.objects.create_user(username='vasya',
-                                             email='vasya@pypkin.com',
-                                             password='12345')
-        self.post = Post.objects.create(text='Какой-то пост',
-                                        author=self.user)
-
-    def test_add_comment_no_auth(self):
-        # Неавторизированный пользователь не может комментировать посты.
-        response = self.client.post(reverse('add_comment', kwargs={
-            'username': self.user.username, 'post_id': self.post.id}),
-                                    follow=True)
-        self.assertRedirects(response,
-                             '/auth/login/?next=%2Fvasya%2F1%2Fcomment%2F')
-
-    def test_add_comment(self):
-        # Авторизированный пользователь может комментировать посты.
-        self.client.force_login(self.user)
-        response = self.client.post(reverse('add_comment', kwargs={
-            'username': self.user.username, 'post_id': self.post.id}),
-                                    {'text': 'какой-то комментарий'},
-                                    follow=True)
-        self.assertContains(response, 'какой-то комментарий')
-
-
-class ImageTests(TestCase):
-    def setUp(self):
-        self.client = Client()
+        # Очищаем кэш
+        cache.clear()
+        # Создаем пользователя
         self.user = User.objects.create_user(
-            username='TestUser', email='mail@mail.ru', password='pwd111'
-        )
-        self.client.login(username='TestUser',
-                          email='mail@mail.ru',
-                          password='pwd111')
-        self.group = Group.objects.create(title='TestGroup', slug='testgroup',
-                                          description='TestDesc')
-        with open('media/posts/test.jpg', 'rb') as fp:
-            self.client.post('/new/', {'group': '1', 'text': 'Test post',
-                                       'image': fp})
+            username='vasya', email='vasya@vasya.com',
+            password='12345')
+        # Создаем пост
+        self.post = Post.objects.create(text='Тестовый пост', author=self.user)
 
-    def test_img_index(self):
-        # При публикации поста с изображнием на главной
-        # странице есть тег <img>
+    def test_add_profile_page(self):
+        """Проверяет, появилась ли страница пользователя после регистрации"""
+        # Регистрируемся
+        self.client.post(reverse('signup'), signup_data)
+        # Логимся
+        self.client.login(username='petr', password='pwd_petr')
+        # Проверяем, появился ли новый пользователь
+        response = self.client.get(
+            reverse('profile', kwargs={'username': 'petr'}))
+        self.assertEqual(response.status_code, 200)
+
+    def test_authorized_user_new_post(self):
+        """Проверяет, что авторизованный пользователь
+        может опубликовать пост"""
+        # Логимся
+        self.client.login(username='vasya', password='12345')
+        # Создаем новый пост
+        self.client.post(reverse('new_post'), kwargs={'text': 'Новый пост'})
+        # Проверяем, появился ли пост после отправки формы
         response = self.client.get(reverse('index'))
-        self.assertContains(response, '<img')
+        self.assertContains(
+            response, 'Новый пост', count=1, status_code=200,
+            msg_prefix='Пост не найден', html=False)
 
-    def test_img_profile(self):
-        # При публикации поста с изображнием на странице
-        # профайла есть тег <img>
+    def test_unauthorized_user_new_post(self):
+        """Проверяет, что неавторизованный пользователь не
+        может опубликовать пост, и его редиректит
+        на страницу авторизации"""
+        # Попытка создать пост неавторизованным пользователем
+        response = self.client.post(
+            reverse('new_post'), {'text': 'Новый пост'})
+        self.assertRedirects(
+            response, '/auth/login/?next=/new/', status_code=302)
+
+    def test_post_add_everywhere(self):
+        """Проверяет, что опубликовынный пост появляется
+        на всех связанных страницах"""
+        # Пост на главной странице
+        response = self.client.get(reverse('index'))
+        self.assertContains(
+            response, 'Тестовый пост', count=1,
+            status_code=200, msg_prefix='Пост не найден на главной странице',
+            html=False)
+        # Пост на странице автора
+        self.client.login(username='vasya', password='12345')
         response = self.client.get(
             reverse('profile', kwargs={'username': self.user.username}))
-        self.assertContains(response, '<img')
+        self.assertContains(
+            response, 'Тестовый пост', count=1,
+            status_code=200,
+            msg_prefix='Пост не найден на странице пользователя', html=False)
+        # Пост на стронице поста
+        response = self.client.get(
+            reverse('profile', kwargs={'username': self.user.username}))
+        self.assertContains(
+            response, 'Тестовый пост', count=1,
+            status_code=200, msg_prefix='Пост не найден на странице поста',
+            html=False)
 
-    def test_img_view(self):
-        # При публикации поста с изображнием на отдельной странице
-        # поста есть тег <img>
-        response = self.client.get('/TestUser/1/')
-        self.assertContains(response, '<img')
+    def test_authorized_user_post_edit(self):
+        """Проверяет, что авторизованный пользователь может
+        отредактировать свой пост, и его содержимое изменится
+        на всех связанных страницах
+        """
+        # Логимся
+        self.client.login(username='vasya', password='12345')
+        # Редактируем пост
+        self.client.post(
+            reverse('post_edit', kwargs={'username': 'vasya',
+                                         'post_id': self.post.id}),
+            {'text': 'Изменили тестовый пост'})
+        # Проверка изменения поста на главной странице
+        response = self.client.get(reverse('index'))
+        self.assertContains(
+            response, 'Изменили тестовый пост', count=1,
+            status_code=200, msg_prefix='Пост не изменен на главной странице',
+            html=False)
+        # Проверка изменения на странице пользователя
+        response = self.client.get(
+            reverse('profile', kwargs={'username': self.user.username}))
+        self.assertContains(
+            response, 'Изменили тестовый пост', count=1,
+            status_code=200,
+            msg_prefix='Пост не изменен на странице пользователя', html=False)
+        # Проверка изменения на странице поста
+        response = self.client.get(
+            reverse('post_view', kwargs={
+                'username': self.user.username, 'post_id': self.post.id}))
+        self.assertContains(
+            response, 'Изменили тестовый пост', count=1,
+            status_code=200, msg_prefix='Пост не изменен на странице поста',
+            html=False)
 
-    def test_img_group(self):
-        # При публикации поста с изображнием на странице
-        # группы есть тег <img>
-        response = self.client.get('/group/testgroup/')
-        self.assertContains(response, '<img')
 
-    @override_settings(CACHES=TEST_CACHE)
-    def test_NoImg(self):
-        # Срабатывает защита от загрузки файлов не-графических форматов
-        with open('media/posts/test_file', 'rb') as fp:
-            self.client.post('/new/',
-                             {'group': '1', 'text': 'Test post', 'image': fp})
-        post = Post.objects.last()
-        with self.assertRaises(ValueError):
-            post.image.open()
+class TestImage(TestCase):
+    def setUp(self):
+        # Очищаем кэш
+        cache.clear()
+        # Создаем пользователя
+        self.user = User.objects.create_user(
+            username='vasya', email='vasya@vasya.com', password='12345')
+        # Создаем группу
+        self.group = Group.objects.create(
+            title='Group', slug='grp_test', description='desc')
+        # Логинемся
+        self.client.login(username='vasya', password='12345')
+        # Создаем пост с картинкой
+        with open('media/posts/test.jpg', 'rb') as f_obj:
+            self.client.post(
+                reverse('new_post'),
+                {'text': 'Text', 'image': f_obj,
+                 'group': self.group.id})
 
-    def tearDown(self):
+    def test_image_everywhere(self):
+        """Проверяет, что картинка есть на всех
+        связанных страницах"""
+        # Ищем картинку на главной странице
+        response = self.client.get(reverse('index'))
+        self.assertContains(
+            response, '<img', status_code=200, count=1,
+            msg_prefix='Тэг не найден на главной странице',
+            html=False)
+        # На странице поста
+        response = self.client.get(
+            reverse('profile', kwargs={'username': self.user.username}))
+        self.assertContains(
+            response, '<img', status_code=200, count=1,
+            msg_prefix='Тэг не найден на странице профиля',
+            html=False)
+        # На странице группы
+        response = self.client.get(
+            reverse('group_post', kwargs={'slug': 'grp_test'}))
+        self.assertContains(
+            response, '<img', status_code=200, count=1,
+            msg_prefix='Тэг не найден на странице группы',
+            html=False)
+
+    def test_wrong_format_file(self):
+        """Проверяет защиту от загрузки файлов
+        неправильных форматов"""
+        with open('requirements.txt', 'rb') as f_obj:
+            self.client.post(
+                reverse('new_post'),
+                {'text': 'Тест картинки с неправильным форматом',
+                 'image': f_obj})
+        response = self.client.get(reverse('index'))
+        self.assertNotContains(
+            response, 'Тест картинки с неправильным форматом',
+            status_code=200, msg_prefix='Тэг найден, а не должен', html=False)
+
+
+class TestCache(TestCase):
+    def setUp(self):
+        self.client.get(reverse('index'))
+        user = User.objects.create_user(
+            username="vasya", email="vasya@vasya.com", password="12345")
+        self.client.login(username='vasya', password='12345')
+        self.client.post(reverse('new_post'), {'text': 'Тест кэша'})
+
+    def test_cache(self):
+        response = self.client.get(reverse('index'))
+        self.assertNotContains(
+            response, 'Тест кэша',
+            status_code=200, msg_prefix='Пост найден, а не должен', html=False)
+        cache.clear()
+        response = self.client.get(reverse('index'))
+        self.assertContains(
+            response, 'Тест кэша',
+            status_code=200, count=1, msg_prefix='Пост не найден', html=False)
+
+
+class TestFollow(TestCase):
+    def setUp(self):
+        # Очищаем кэш
+        cache.clear()
+        # Создаем пользователей
+        self.user1 = User.objects.create_user(
+            username='vasya', email='vasya@vasya.com',
+            password='12345')
+        self.user2 = User.objects.create_user(
+            username='ivan', email='ivan@ivan.com',
+            password='12345')
+        self.user3 = User.objects.create_user(
+            username='petr', email='petr@petr.com',
+            password='12345')
+        # Логимся
+        self.client.login(username='vasya', password='12345')
+        # Создаем пост
+        self.post = Post.objects.create(
+            text='Тест подписок', author=self.user3)
+
+    def test_authorized_follow_unfollow(self):
+        """Проверяет, что авторизованный пользователь может
+        подписываться на других пользователей и
+        удалять их из подписок"""
+        # Подписываемся
+        self.client.get(
+            reverse('profile_follow', kwargs={'username': self.user2}))
+        response = self.client.get(
+            reverse('profile', kwargs={'username': self.user1}))
+        self.assertEqual(response.context["following"], False)
+        # Отписываемся
+        self.client.get(reverse('profile_unfollow',
+                                kwargs={'username': self.user2}))
+        response = self.client.get(
+            reverse('profile', kwargs={'username': self.user1}))
+        self.assertEqual(response.context["following"], 0)
+
+    def test_follow_posts_feed(self):
+        """Проверяет, что новая запись пользователя появляется
+        в ленте тех, кто на него подписан и не появляется
+        в ленте тех, кто не подписан на него"""
+        # Подписываемся и проверяем наличие поста в ленте
+        self.client.get(
+            reverse('profile_follow', kwargs={'username': self.user3}))
+        response = self.client.get(reverse('follow_index'))
+        self.assertContains(
+            response, 'Тест подписок', status_code=200,
+            count=1, msg_prefix='Пост не найден',
+            html=False)
+        # Выходим из аккаунта и првоеряем ленту
         self.client.logout()
+        # Очищаем кэш
+        cache.clear()
+        self.client.login(username='ivan', password='12345')
+        response = self.client.get(reverse('follow_index'))
+        self.assertNotContains(
+            response, 'Тест подписок', status_code=200,
+            msg_prefix='Пост найден, а не должен',
+            html=False)
+
+    def test_comment(self):
+        """Проверяет, что только авторизированный пользователь
+        может комментировать посты"""
+        # Оставляем комментарий залогиненным пользователем
+        self.client.post(
+            reverse('add_comment', kwargs={
+                'username': self.user3, 'post_id': self.post.id}),
+            {'text': 'Проверяем комментарий залогиненного'})
+        # Проверяем наличие комментария
+        response = self.client.get(
+            reverse('post_view', kwargs={'username': self.user3,
+                                         'post_id': self.post.id}))
+        self.assertContains(
+            response, 'Проверяем комментарий залогиненного', status_code=200,
+            count=1, msg_prefix='Комментарий не найден',
+            html=False)
+        # Выходим из аккаунта
+        self.client.logout()
+        # Пытаемся добавить комментарий незалогиненным пользователем
+        self.client.post(
+            reverse('add_comment', kwargs={
+                'username': self.user3, 'post_id': self.post.id}),
+            {'text': 'Проверяем комментарии незалогиненного'})
+        self.assertNotContains(
+            response, 'Проверяем комментарии незалогиненного',
+            status_code=200,
+            msg_prefix='Комментарий найден, а не должен',
+            html=False)
